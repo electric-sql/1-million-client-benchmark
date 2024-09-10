@@ -1,0 +1,32 @@
+{
+  "name": "1-million-client-benchmark",
+  "version": "1.0.0",
+  "description": "Infra code &amp; benchmark code to benchmark 1 million clients getting updates from a commodity Postgres instance",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/electric-sql/1-million-client-benchmark.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/electric-sql/1-million-client-benchmark/issues"
+  },
+  "homepage": "https://github.com/electric-sql/1-million-client-benchmark#readme",
+  "dependencies": {
+    "@electric-sql/client": "^0.4.0",
+    "@observablehq/plot": "^0.6.16",
+    "@trpc/client": "^11.0.0-rc.502",
+    "@trpc/server": "^11.0.0-rc.502",
+    "@types/pg": "^8.11.8",
+    "@types/uuid": "^10.0.0",
+    "p-queue": "^8.0.1",
+    "pg": "^8.12.0",
+    "sst": "^3.0.119",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.8"
+  }
+}
