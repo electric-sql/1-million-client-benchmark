@@ -2,6 +2,10 @@ import { Resource } from "sst";
 import type { Router } from "./index";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import PQueue from "p-queue";
+import _ from "lodash";
+import pLimit from "p-limit";
+
+const limit = pLimit(1);
 
 const client = createTRPCClient<Router>({
   links: [
@@ -14,7 +18,7 @@ const client = createTRPCClient<Router>({
 async function main() {
   const id = await client.createNode.mutate({
     client_count: 0,
-    region: `laptop`,
+    region: process.env.AWS_REGION || `laptop`,
   });
 
   let state = {
@@ -22,31 +26,20 @@ async function main() {
     id,
   };
 
-  let lastCall = 0;
-  let relayStateTimeout = null;
   async function relayState() {
-    const now = Date.now();
-    clearTimeout(relayStateTimeout);
-    if (now - lastCall >= 500) {
-      lastCall = now;
-      // Add the state relaying logic here
-      console.log("Relaying state information");
-      try {
-        await client.updateNodeState.mutate({
-          id: state.id,
-          client_count: state.client_count.size,
-        });
-      } catch (e) {
-        console.log(`error updating node state`, e);
-      }
-    }
-    relayStateTimeout = setTimeout(() => {
-      client.updateNodeState.mutate({
+    // Add the state relaying logic here
+    console.log("Relaying state information");
+    try {
+      await client.updateNodeState.mutate({
         id: state.id,
         client_count: state.client_count.size,
       });
-    }, 500);
+    } catch (e) {
+      console.log(`error updating node state`, e);
+    }
   }
+
+  const throttledRelayState = _.throttle(relayState, 1000);
 
   console.log(`new coordinator`, id);
 
@@ -57,16 +50,16 @@ async function main() {
     let argsArray = [];
     let timeoutId = null;
 
-    async function send() {
-      const message = argsArray[0];
+    async function send(resultsBatch) {
+      const message = resultsBatch[0];
       try {
         await client.createRunResults.mutate({
           run_id: message.lastRun,
           node_id: id,
-          batch_size: argsArray.length,
+          batch_size: resultsBatch.length,
           average_time:
-            argsArray.reduce((acc, curr) => acc + curr.diff, 0) /
-            argsArray.length,
+            resultsBatch.reduce((acc, curr) => acc + curr.diff, 0) /
+            resultsBatch.length,
         });
       } catch (e) {
         console.log(`error writing run results`, e);
@@ -79,15 +72,17 @@ async function main() {
 
       if (callCount === 1) {
         timeoutId = setTimeout(() => {
-          send();
+          const resultsBatch = structuredClone(argsArray);
+          limit(() => send(resultsBatch));
           argsArray = [];
           callCount = 0;
           clearTimeout(timeoutId);
         }, 500);
       }
 
-      if (callCount === 2) {
-        send();
+      if (callCount === 10) {
+        const resultsBatch = structuredClone(argsArray);
+        limit(() => send(resultsBatch));
         argsArray = [];
         callCount = 0;
         clearTimeout(timeoutId);
@@ -106,7 +101,7 @@ async function main() {
           if (message.msg === "up-to-date") {
             console.log(`message from child`, { message });
             state.client_count.add(message.id);
-            relayState();
+            throttledRelayState();
             if (!message.isFirstRun) {
               sendBatchedRunResults(message);
             }
@@ -117,7 +112,7 @@ async function main() {
     });
   };
 
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 100; i++) {
     queue.add(spawnChild);
   }
 

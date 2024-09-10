@@ -6,14 +6,7 @@ import {
 } from "@trpc/server/adapters/aws-lambda";
 import { initTRPC } from "@trpc/server";
 import { v4 as uuidv4 } from "uuid";
-import pg from "pg";
-
-const { Pool } = pg;
-const pool = new Pool({
-  connectionString: `postgresql://postgres.fhlbapsbkuzuwufzsbue:GUFdPNh2lp.uC4Yb@aws-0-us-east-1.pooler.supabase.com:5432/postgres`,
-});
-
-pool.connect();
+import sql from "./db.js";
 
 const t = initTRPC
   .context<CreateAWSLambdaContextOptions<APIGatewayEvent>>()
@@ -21,28 +14,26 @@ const t = initTRPC
 
 async function removeInactiveNodes() {
   // Check for nodes with is_active true and last_heartbeat more than 1 minute ago
-  const checkNodesQuery = `
+  try {
+    await sql`
         UPDATE nodes
         SET is_active = false
         WHERE is_active = true AND (now() - last_heartbeat) > INTERVAL '1 minute'
       `;
-  const res = await pool.query(checkNodesQuery);
+  } catch (e) {
+    console.error(`disable nodes query failed`, e);
+  }
 }
 
 const router = t.router({
-  greet: t.procedure
-    .input(z.object({ name: z.string() }))
-    .query(({ input }) => {
-      return `Hello ${input.name}!`;
-    }),
   startRun: t.procedure.mutation(async () => {
     const id = uuidv4();
 
     removeInactiveNodes();
 
-    const query = `INSERT INTO runs (id, type)
-        VALUES ($1, $2)`;
-    await pool.query(query, [id, `incremental`]);
+    await sql`INSERT INTO runs (id, type)
+        VALUES (${id}, 'incremental')`;
+
     return id;
   }),
   createNode: t.procedure
@@ -55,15 +46,10 @@ const router = t.router({
 
       removeInactiveNodes();
 
-      const query = `INSERT INTO nodes (id, is_active, last_heartbeat, client_count, region)
-        VALUES ($1, $2, $3, $4, $5)`;
-      await pool.query(query, [
-        id,
-        true,
-        new Date(),
-        input.client_count,
-        input.region,
-      ]);
+      await sql`INSERT INTO nodes (id, is_active, last_heartbeat, client_count, region)
+        VALUES (${id}, true, ${new Date()}, ${input.client_count}, ${
+        input.region
+      })`;
 
       return id;
     }),
@@ -72,33 +58,37 @@ const router = t.router({
     .mutation(async ({ input }) => {
       removeInactiveNodes();
 
-      const updateHeartbeatQuery = `
+      try {
+        await sql`
         UPDATE nodes
-        SET is_active = true, last_heartbeat = $1
-        WHERE id = $2
+        SET is_active = true, last_heartbeat = ${new Date()}
+        WHERE id = ${input.id}
       `;
-      const res = await pool.query(updateHeartbeatQuery, [
-        new Date(),
-        input.id,
-      ]);
+      } catch (e) {
+        console.error(`failed to record heartbeat`, e);
+      }
       return { ok: true };
     }),
   updateNodeState: t.procedure
     .input(z.object({ id: z.string().uuid(), client_count: z.number().min(0) }))
     .mutation(async ({ input }) => {
       removeInactiveNodes();
-      console.log(`updateNodeState`, { id: input.id });
+      console.log(`updateNodeState`, {
+        id: input.id,
+        client_count: input.client_count,
+      });
 
-      const updateNodeState = `
+      let res;
+      try {
+        res = await sql`
         UPDATE nodes
-        SET client_count = $1, last_heartbeat = $2
-        WHERE id = $3
+        SET client_count = ${input.client_count}, last_heartbeat = ${new Date()}
+        WHERE id = ${input.id}
       `;
-      const res = await pool.query(updateNodeState, [
-        input.client_count,
-        new Date(),
-        input.id,
-      ]);
+      } catch (e) {
+        console.error(`failed to update node state`, e);
+      }
+      console.log(`res`, res);
       return { ok: true };
     }),
   createRunResults: t.procedure
@@ -111,19 +101,14 @@ const router = t.router({
       })
     )
     .mutation(async ({ input }) => {
-      console.log(`inserting run_results`)
-      const query = `INSERT INTO run_results (id, node_id, run_id, batch_size, average_time)
-        VALUES ($1, $2, $3, $4, $5)`;
+      console.log(`inserting run_results`);
       try {
-        await pool.query(query, [
-          uuidv4(),
-          input.node_id,
-          input.run_id,
-          input.batch_size,
-          input.average_time,
-        ]);
+        await sql`INSERT INTO run_results (id, node_id, run_id, batch_size, average_time)
+        VALUES (${uuidv4()}, ${input.node_id}, ${input.run_id}, ${
+          input.batch_size
+        }, ${input.average_time})`;
       } catch (e) {
-        console.log(`error inserting run results`, e);
+        console.error(`error inserting run results`, e);
       }
       return { ok: true };
     }),

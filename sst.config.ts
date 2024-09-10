@@ -19,6 +19,10 @@ export default $config({
       dev: {
         command: `npm run dev`,
       },
+      build: {
+        command: `npm run build`,
+        output: `dist`,
+      },
       environment: {
         VITE_TRPC_URL: trpc.url,
       },
@@ -36,6 +40,15 @@ export default $config({
       link: [trpc],
       dev: {
         command: `bun coordinator.ts`,
+      },
+      scaling: {
+        min: 1,
+        max: 2,
+      },
+      cpu: "1 vCPU",
+      memory: `3 GB`,
+      image: {
+        dockerfile: `Dockerfile.coordinator`,
       },
     });
 
